@@ -1,5 +1,10 @@
 ---
 title: "Mutational signatures impact the evolution of anti-EGFR antibody resistance in coloectal cancer"
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
 subtitle: "Figure S7"
 author: "Andrew Woolston"
 date: "06/01/2021"
@@ -25,7 +30,7 @@ library(BSgenome.Hsapiens.UCSC.hg19)
 # External documents
 
 ```{r external files,echo=T,eval=T}
-
+.
 ## Synapse ID - syn12026190
 cosmic_filename<-'COSMIC_Mutational_Signatures_v3.1_SBS_GRCh37_WXS.xlsx'
 
