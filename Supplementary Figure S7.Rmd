@@ -1,0 +1,596 @@
+---
+title: "Mutational signatures impact the evolution of anti-EGFR antibody resistance in coloectal cancer"
+subtitle: "Figure S7"
+author: "Andrew Woolston"
+date: "06/01/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Libraries
+
+```{r load required libraries,message=FALSE}
+
+library(devtools)
+library(readxl)
+library(GenomicRanges)
+library(SigsPack)
+library(BSgenome.Hsapiens.UCSC.hg19)
+
+```
+
+# External documents
+
+```{r external files,echo=T,eval=T}
+
+## Synapse ID - syn12026190
+cosmic_filename<-'COSMIC_Mutational_Signatures_v3.1_SBS_GRCh37_WXS.xlsx'
+
+## Exome regions file
+target_filename<-'SSV5_regions.bed'
+
+## signature weights as shown in supplementary table S2
+weights_filename<-"Supplementary_Table_S2.xlsx"
+
+```
+
+# Patients and signatures of interest
+
+```{r,echo=T,eval=T}
+
+## Select BL sample from tumours with prolonged benefit
+selected.cases<-c('C1005BL', 'C1007BL', 'C1014BL', 'C1018BL', 'C1020BL', 'C1024BL', 'C1025BL', 'C1026BL', 'C1027BL', 'C1030BL', 'C1037BL', 'C1044BL')
+
+## Select COSMIC signatures
+selected.signatures<- c('SBS1','SBS3','SBS5','SBS6','SBS15','SBS17a','SBS17b','SBS35','SBS40')
+
+```
+
+# Normalise reference signatures
+
+```{r,echo=T,eval=T}
+
+## Load the canonical signature profiles
+Canonical_Signatures <- as.matrix(read_excel(cosmic_filename)); 
+## set rownames to common trinucleotide mutation context notation
+rownames(Canonical_Signatures)<-paste0(substr(Canonical_Signatures[,'SubType'],1,1),'[',Canonical_Signatures[,'Type'],']',substr(Canonical_Signatures[,'SubType'],3,3));
+
+## extract signatures of interest
+Canonical_Signatures_selected<-t(Canonical_Signatures)[selected.signatures,]
+class(Canonical_Signatures_selected)<-"numeric"
+
+## determine the trinucleotide across the exome (we are using the signatures derived exclusively from exome samples and so the conversion is exome context to even). 
+regions <- read.delim(target_filename, header=FALSE, stringsAsFactors=FALSE)
+
+## convert to Granges object
+gr<-GenomicRanges::GRanges(seqnames=regions[,1],ranges=IRanges::IRanges(start=regions[,2],end=regions[,3]),strand=c("*"))
+
+## gather all trinucleotide contexts across the whole exome
+exome_context <- SigsPack::get_context_freq(BSgenome.Hsapiens.UCSC.hg19::BSgenome.Hsapiens.UCSC.hg19, gr)
+
+## set the conversion proportions
+source_context<-target_context<-exome_context
+target_context[,1]<-sum(source_context)/length(source_context)
+
+Canonical_Signatures_selected_ExomeScaled<-SigsPack::normalize(t(Canonical_Signatures_selected), source_context, target_context = target_context)
+
+```
+
+# Compute signature proportions
+
+```{r}
+
+## Load signature data and assign signature labels as rownames (see Supplementary Table S2)
+Signature.Matrix <- as.matrix(read_excel(weights_filename))
+rownames(Signature.Matrix)<-Signature.Matrix[,'Signatures']
+
+## Extract assigned signature weights and convert to numeric
+Signature.Weights<-Signature.Matrix[selected.signatures,][,selected.cases]
+class(Signature.Weights)<-"numeric"
+
+## Extract the explained variance
+R2<-as.numeric(Signature.Matrix['R2',][selected.cases])
+
+## Adjust signature weights by the R2 value
+Signature.Weights.mat.adjusted<-t(t(Signature.Weights) * R2)
+
+## Extract the mutation load of each sample
+Mutation.Load<-as.numeric(Signature.Matrix['MutationLoad',][selected.cases])
+
+## Calculate the mutation load attributed to each signature
+Signature.AssignedMutations<-rbind(t(t(Signature.Weights.mat.adjusted) * Mutation.Load),"unexplained proportion"=(1-R2)*Mutation.Load);
+
+## Prolonged Benefit BL
+BL.ProlongedBenefit.Summary<-rowSums(Signature.AssignedMutations[,selected.cases])
+
+## Calculate the overall proportional signature contributions
+prop.sig.contribution<-(rowSums(Signature.AssignedMutations)/sum(BL.ProlongedBenefit.Summary))[selected.signatures]
+
+## Scale the signature constributions to sum to the median mutation load
+prop.sig.contribution.nomiss<-prop.sig.contribution*(1/sum(prop.sig.contribution))
+
+```
+
+# Figure S7A
+
+```{r,echo=T,eval=T,fig.width=10, fig.height=5, fig.align = "center"}
+
+## weight the signature contributions by observed proportions
+select.default.weighted<-as.matrix(prop.sig.contribution.nomiss*t(Canonical_Signatures_selected_ExomeScaled))
+class(select.default.weighted)<-"numeric";
+
+colours<-rbind(c("SBS1","lightblue"),
+               c("SBS3","darkblue"),
+               c("SBS5","lightgreen"),
+               c("SBS6","yellow"),
+               c("SBS15","darkgreen"),
+               c("SBS17a","orangered"),
+               c("SBS17b","red"),
+               c("SBS35","purple"),
+               c("SBS40","orange"))
+
+colour_code<-colours[,2][match(rownames(select.default.weighted),colours[,1])]
+
+## plot modelled mutation profile
+barplot(select.default.weighted,col=colour_code,las=2,cex.names=0.5)
+
+```
+
+# Figure S7B
+
+```{r reported hotspot mutations,echo=F,eval=T}
+
+## Prospect C reported mutations (Khan et al., Cancer Discovery, 2018)
+Prospect1_KnownMuts<-rbind(c("chr12","25398285","25398285","C","A","C1005","KRAS","G12C"), ## KRAS G12C
+                        c("chr1","115256530","115256530","G","T","C1005","NRAS","Q61K"), ## NRAS Q61K
+                        c("chr12","25398285","25398285","C","A","C1044","KRAS","G12C"),  ## KRAS G12C
+                        c("chr12","25380275","25380275","T","G","C1044","KRAS","Q61H"),  ## KRAS Q61H
+                        c("chr1","115256530","115256530","G","T","C1044","NRAS","Q61K") ## NRAS Q61K
+)
+
+## Prospect C mutations (Woolston et al, Cancer Cell, 2019)
+Prospect2_KnownMuts<-rbind(c("chr1","115256530","115256530","G","T","C1041","NRAS","Q61K"), ## NRAS Q61K
+                          c("chr12","25398284","25398284","C","A","C1030","KRAS","G12V"),  ## KRAS G12V
+                          c("chr12","25398284","25398284","C","T","C1030","KRAS","G12D"),  ## KRAS G12D
+                          c("chr12","25398281","25398281","C","T","C1030","KRAS","G13D"),  ## KRAS G13D
+                          c("chr12","25380275","25380275","T","G","C1025","KRAS","Q61H"),  ## KRAS Q61H
+                          c("chr12","25380275","25380275","T","G","C1030","KRAS","Q61H"),  ## KRAS Q61H
+                          c("chr12","25380275","25380275","T","G","C1030","KRAS","Q61H"),  ## KRAS Q61H
+                          c("chr12","25380275","25380275","T","A","C1030","KRAS","Q61H"),  ## KRAS Q61H
+                          c("chr12","25380275","25380275","T","G","C1037","KRAS","Q61H"))  ## KRAS Q61H
+                          
+## Detection of circulating tumor ... (Bettegowda et al., Science Translational Medicine, 2014)
+Bettegowda_KnownMuts<-rbind(c("chr12","25398284","25398284","C","T","Patient5","KRAS","G12D"),  ## KRAS G12D
+                            c("chr12","25380275","25380275","T","A","Patient16","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr12","25398284","25398284","C","A","Patient18","KRAS","G12V"), ## KRAS G12V
+                            c("chr1","115258748","115258748","C","T","Patient18","NRAS","G12S"), ## NRAS G12S
+                            c("chr1","115256528","115256528","T","A","Patient19","NRAS","Q61H"), ## NRAS Q61H
+                            c("chr12","25398284","25398284","C","A","Patient21","KRAS","G12V"), ## KRAS G12V
+                            c("chr1","115256528","115256528","T","A","Patient21","NRAS","Q61H"), ## NRAS Q61H
+                            c("chr1","115256529","115256529","T","C","Patient21","NRAS","Q61R"), ## NRAS Q61R
+                            c("chr12","25398284","25398284","C","G","Patient22","KRAS","G12A"), ## KRAS G12A
+                            c("chr12","25398285","25398285","C","A","Patient22","KRAS","G12C"), ## KRAS G12C
+                            c("chr12","25398285","25398285","C","T","Patient22","KRAS","G12S"), ## KRAS G12S
+                            c("chr12","25398284","25398284","C","T","Patient22","KRAS","G12D"), ## KRAS G12D
+                            c("chr12","25398284","25398284","C","A","Patient22","KRAS","G12V"), ## KRAS G12V
+                            c("chr12","25398284","25398284","C","G","Patient24","KRAS","G12A"), ## KRAS G12A
+                            c("chr1","115256530","115256530","G","T","Patient24","NRAS","Q61K"), ## NRAS Q61K
+                            c("chr12","25398284","25398284","C","A","Patient26","KRAS","G12V"), ## KRAS G12V
+                            c("chr12","25398284","25398284","C","A","Patient26","KRAS","G12V"), ## KRAS G12V
+                            c("chr12","25398284","25398284","C","G","Patient1","KRAS","G12A"), ## KRAS G12A
+                            c("chr12","25398285","25398285","C","A","Patient1","KRAS","G12C"), ## KRAS G12C
+                            c("chr12","25398285","25398285","C","G","Patient1","KRAS","G12R"), ## KRAS G12R
+                            c("chr12","25398284","25398284","C","T","Patient1","KRAS","G12D"), ## KRAS G12D
+                            c("chr12","25398284","25398284","C","A","Patient1","KRAS","G12V"), ## KRAS G12V
+                            c("chr12","25380275","25380275","T","A","Patient1","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr12","25380276","25380276","T","A","Patient1","KRAS","Q61L"), ## KRAS Q61L
+                            c("chr12","25380276","25380276","T","C","Patient1","KRAS","Q61R"), ## KRAS Q61R
+                            c("chr1","115256530","115256530","G","T","Patient1","NRAS","Q61K"), ## NRAS Q61K
+                            c("chr1","115256528","115256528","T","G","Patient1","NRAS","Q61H"), ## NRAS Q61H
+                            c("chr1","115256529","115256529","T","A","Patient1","NRAS","Q61L"), ## NRAS Q61L
+                            c("chr1","115256529","115256529","T","C","Patient1","NRAS","Q61R"), ## NRAS Q61R
+                            c("chr12","25398284","25398284","C","A","Patient2","KRAS","G12V"), ## KRAS G12V
+                            c("chr12","25398285","25398285","C","G","Patient4","KRAS","G12R"), ## KRAS G12R
+                            c("chr12","25380275","25380275","T","A","Patient4","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr12","25398284","25398284","C","G","Patient7","KRAS","G12A"), ## KRAS G12A
+                            c("chr12","25398284","25398284","C","A","Patient7","KRAS","G12V"), ## KRAS G12V
+                            c("chr1","115256528","115256528","T","A","Patient7","NRAS","Q61H"), ## NRAS Q61H
+                            c("chr1","115256530","115256530","G","T","Patient7","NRAS","Q61K"), ## NRAS Q61K
+                            c("chr1","115256529","115256529","T","A","Patient7","NRAS","Q61L"), ## NRAS Q61L
+                            c("chr12","25398284","25398284","C","T","Patient9","KRAS","G12D"), ## KRAS G12D
+                            c("chr1","115256530","115256530","G","T","Patient9","NRAS","Q61K"), ## NRAS Q61K
+                            c("chr12","25398284","25398284","C","A","Patient10","KRAS","G12V"), ## KRAS G12V
+                            c("chr12","25380275","25380275","T","A","Patient10","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr12","25380275","25380275","T","G","Patient10","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr12","25398284","25398284","C","G","Patient12","KRAS","G12A"), ## KRAS G12A
+                            c("chr12","25398285","25398285","C","A","Patient12","KRAS","G12C"), ## KRAS G12C
+                            c("chr12","25380275","25380275","T","G","Patient12","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr12","25398285","25398285","C","G","PatientBARD101","KRAS","G12R"), ## KRAS G12R
+                            c("chr12","25380275","25380275","T","A","PatientBARD101","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr1","115256529","115256529","T","C","PatientBARD101","NRAS","Q61R"), ## NRAS Q61R
+                            c("chr12","25398285","25398285","C","G","PatientBARD102","KRAS","G12R"), ## KRAS G12R
+                            c("chr12","25398285","25398285","C","G","PatientBARD102","KRAS","G12R"), ## KRAS G12R
+                            c("chr12","25380277","25380277","G","C","PatientBARD102","KRAS","Q61E"), ## KRAS Q61E
+                            c("chr12","25398284","25398284","C","T","PatientBARD103","KRAS","G12D"), ## KRAS G12D
+                            c("chr12","25398284","25398284","C","A","PatientBARD103","KRAS","G12V"), ## KRAS G12V
+                            c("chr12","25398285","25398285","C","A","CRC188","KRAS","G12C"), ## KRAS G12C
+                            c("chr12","25380275","25380275","T","A","CRC189","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr12","25380275","25380275","T","G","CRC189","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr12","25398284","25398284","C","G","CRC190","KRAS","G12A"), ## KRAS G12A
+                            c("chr12","25380275","25380275","T","G","CRC190","KRAS","Q61H"), ## KRAS Q61H
+                            c("chr12","25380276","25380276","T","C","CRC190","KRAS","Q61R"), ## KRAS Q61R
+                            c("chr1","115256529","115256529","T","A","CRC190","NRAS","Q61L"), ## NRAS Q61L
+                            c("chr1","115256529","115256529","T","C","CRC190","NRAS","Q61R"), ## NRAS Q61R
+                            c("chr12","25398284","25398284","C","T","CRC191","KRAS","G12D"), ## KRAS G12D
+                            c("chr12","25398285","25398285","C","G","CRC191","KRAS","G12R"), ## KRAS G12R
+                            c("chr12","25398284","25398284","C","A","CRC191","KRAS","G12V"), ## KRAS G12V
+                            c("chr12","25380275","25380275","T","G","CRC191","KRAS","Q61H")) ## KRAS Q61H
+
+```
+
+```{r,eval=T,echo=T,fig.width=5, fig.height=5, fig.align = "center"}
+
+KRASNRASEGFR_KnownMuts<-rbind(Prospect1_KnownMuts,Prospect2_KnownMuts,Bettegowda_KnownMuts); KRASNRASEGFR_KnownMuts=KRASNRASEGFR_KnownMuts[which(KRASNRASEGFR_KnownMuts[,7]%in%c("KRAS","NRAS")),];
+
+All.Mut.Prop<-dim(KRASNRASEGFR_KnownMuts)[1]
+Q61.Prop<-dim(KRASNRASEGFR_KnownMuts[which(KRASNRASEGFR_KnownMuts[,8]=="Q61H"),])[1]/All.Mut.Prop
+notQ61.Prop<-dim(KRASNRASEGFR_KnownMuts[which(KRASNRASEGFR_KnownMuts[,8]!="Q61H"),])[1]/All.Mut.Prop
+
+## make barplot
+mids<-barplot(c(notQ61.Prop,Q61.Prop),col=c("red","blue"),ylim=c(0,1),ylab="Proportion of KRAS/NRAS codon 12/13/61")
+axis(1,c("G12 G13 Q61 (Not Q61H)","Q61H"),at=mids)
+
+## fold change
+text(x=mids[1]+(mids[2]-mids[1])/2,y=0.9,labels=paste0(round(notQ61.Prop/Q61.Prop,2),"-fold fewer Q61H generated"))
+
+```
+
+# Figure S7C-D
+
+## Set parameters on clinical data 
+
+```{r clinical data,echo=T,eval=T}
+
+## age (years) at diagnosis of mets
+AGE_AT_DIAGNOSIS=68.4
+
+## median age (years) at BL biopsy
+AGE_AT_BIOPSY=71.1
+
+## median time (years) since diagnosis of mets
+DIAGNOSIS_TO_BIOPSY=AGE_AT_BIOPSY-AGE_AT_DIAGNOSIS
+
+## 2x the time from diagnosis as tumours are likely there for 6 months to a few years before diagnosed
+AGE_AT_TUMOUR_INITIATION=AGE_AT_BIOPSY-(2*DIAGNOSIS_TO_BIOPSY)
+
+```
+
+## Define which hotspot mutations to consider
+
+```{r Define hotspot mutations, echo=T,eval=T}
+
+##KRAS/NRAS mutation in Figure 3A
+hotspot.contexts=rbind(
+  c("A[C>G]C","KRAS G12A"),
+  c("C[C>A]A","KRAS G12C"),
+  c("A[C>T]C","KRAS G12D"),
+  c("C[C>G]A","KRAS G12R"),
+  c("C[C>T]A","KRAS G12S"),
+  c("A[C>A]C","KRAS G12V"),
+  c("G[C>T]C","KRAS G13D"),
+  c("C[C>A]A","KRAS G13C"),
+  c("T[C>G]A","KRAS Q61E"),
+  c("C[T>A]T","KRAS Q61H (T>A)"),
+  c("C[T>G]T","KRAS Q61H (T>G)"),
+  c("T[C>A]A","KRAS Q61K"),
+  c("T[T>A]G","KRAS Q61L"),
+  c("T[T>G]G","KRAS Q61P"),
+  c("T[T>C]G","KRAS Q61R"),
+  c("A[C>G]C","NRAS G12A"),
+  c("C[C>A]T","NRAS G12C"),
+  c("A[C>T]C","NRAS G12D"),
+  c("C[C>T]T","NRAS G12S"),
+  c("A[C>A]C","NRAS G12V"),
+  c("A[C>T]C","NRAS G13D"),
+  c("C[C>G]A","NRAS G13R"),
+  c("C[T>A]T","NRAS Q61H (T>A)"),
+  c("C[T>G]T","NRAS Q61H (T>G)"),
+  c("T[T>A]G","NRAS Q61L"),
+  c("A[C>A]A","NRAS Q61K"),
+  c("T[T>C]G","NRAS Q61R"))
+
+```
+
+## Constant and accelerating mutation accumulation
+
+TOTAL = (RATE x AGE_AT_DIAGNOSIS) + (RATE x ACCELERATION x DIAGNOSIS_TO_BIOPSY_YEARS)
+
+TOTAL = RATE[ AGE_AT_DIAGNOSIS + ACCELERATION x DIAGNOSIS_TO_BIOPSY_YEARS]
+
+RATE = TOTAL / [ AGE_AT_DIAGNOSIS + ACCELERATION x DIAGNOSIS_TO_BIOPSY_YEARS]
+
+```{r,echo=T,eval=T}
+
+MutationRateAdjustment<-function(rate.acceleration,constant.signatures,acceleration.start,acceleration.end){
+  
+  acceleration.diff=acceleration.end-acceleration.start
+  
+  rate.matrix<-Signature.AssignedMutations[constant.signatures,]/(acceleration.start+acceleration.diff*rate.acceleration)
+  
+  return(rate.matrix)
+  
+}
+
+```
+
+```{r split clock like mutation load into constant and accelerating portions,echo=T,eval=T}
+
+raw.mutation.split<-function(constant.signatures,acceleration.start,acceleration.end){
+
+  acceleration.diff=acceleration.end-acceleration.start
+  
+  Clocklike_MutationTotals<-matrix(NA,length(rates),3); rownames(Clocklike_MutationTotals)<-paste0("x",rates); colnames(Clocklike_MutationTotals)<-c("Constant.Rate","Accelerating.Rate","Total")
+  for(j in 1:length(rates)){ 
+    Clocklike_MutationTotals[j,]['Constant.Rate']<-sum(acceleration.start*MutationRateAdjustment(rate.acceleration=rates[j],constant.signatures,acceleration.start,acceleration.end)[constant.signatures,])
+    Clocklike_MutationTotals[j,]['Accelerating.Rate']<-sum(acceleration.diff*MutationRateAdjustment(rate.acceleration=rates[j],constant.signatures,acceleration.start,acceleration.end)[constant.signatures,]*rates[j])
+  }
+  
+  Clocklike_MutationTotals[,'Total']<-Clocklike_MutationTotals[,'Constant.Rate']+Clocklike_MutationTotals[,'Accelerating.Rate']
+  
+  Clocklike_MutationTotals<-round(Clocklike_MutationTotals,0)
+  
+  return(Clocklike_MutationTotals)
+
+}
+
+```
+
+```{r acceleration plot,echo=T,eval=T, fig.align = "center"}
+
+acceleration.plot<-function(Clocklike_MutationTotal,acceleration.start,acceleration.end){
+
+plot(1, type="n", xlim=c(0,80),ylim=c(0,2000),xlab="Age (years)",ylab="Total Mutations",bty='n')
+  
+axis(1,at=c(acceleration.start,acceleration.end))
+
+abline(v=acceleration.start,lty=2,col="grey")
+abline(v=acceleration.end,lty=2,col="grey")
+
+colours=c("black","purple","green")
+
+legend("topleft",col=colours,legend=paste0("x",rates),bty='n',lty=1)
+
+for(j in 1:length(rates)){
+  
+  segments(x0=0,x1=acceleration.start,y0=0,y1=Clocklike_MutationTotal[,'Constant.Rate'][j],col=colours[j])
+  
+  segments(x0=acceleration.start,x1=acceleration.end,y0=Clocklike_MutationTotal[,'Constant.Rate'][j],y1=Clocklike_MutationTotal[,'Total'][j],col=colours[j])
+  
+}
+}
+
+```
+
+## Adjusted signature exposures
+
+```{r generate adjusted signature exposure matrix,echo=T,eval=T}
+
+adjusted.exposures<-function(constant.signatures,temp.signatures,acceleration.start,acceleration.end){
+  
+  acceleration.diff=acceleration.end-acceleration.start
+    
+  acceleration.adjusted=list(); for(j in 1:length(rates)){
+  
+    ## temporary signatures
+    temp.sigs=Signature.AssignedMutations[temp.signatures,]
+      
+    ## acceleration adjusted signatures
+    acceleration.adjusted.sigs=MutationRateAdjustment(rate.acceleration=rates[j],constant.signatures=constant.signatures,acceleration.start,acceleration.end)*acceleration.diff*rates[j]
+    
+    acceleration.adjusted[[paste0("x",rates[j])]]<-rbind(acceleration.adjusted.sigs,temp.sigs)[selected.signatures,]
+
+  }
+  return(acceleration.adjusted)
+}
+
+```
+
+```{r weight signatures,echo=T,eval=T}
+
+constrain.weighted.signatures<-function(sig.props,constrained.sigs){
+
+  if(length(which(constrained.sigs!="ALL")>0)){
+  constrained.sigs<-unlist(strsplit(constrained.sigs,"[|]"))
+  sig.props[constrained.sigs]<-0
+  }
+
+  weighted.sigs<-t(as.matrix(sig.props*t(Canonical_Signatures_selected_ExomeScaled)));
+
+return(weighted.sigs)
+}
+
+```
+
+```{r,echo=T,eval=T}
+
+signature.influence<-function(Hotspot_Probability){
+
+  Q61HProb<-lapply(Hotspot_Probability,function(x) sum(as.numeric(x[grep("Q61H",x[,2]),][,3])))
+  
+  OtherProb<-lapply(Hotspot_Probability,function(x) sum(as.numeric(x[grep("Q61H",x[,2],invert=T),][,3])))
+  
+  mutation.probability.table<-rbind((unlist(Q61HProb)/(unlist(Q61HProb)+unlist(OtherProb)))*100,
+  (unlist(OtherProb)/(unlist(Q61HProb)+unlist(OtherProb)))*100)
+  rownames(mutation.probability.table)<-c("Q61H","Other")
+return(mutation.probability.table)
+  
+}
+
+```
+
+## Q61H versus other hotspots
+
+```{r barplots of Q61 probability versus all other drivers,echo=T,eval=T}
+
+barplot.Q61<-function(Q61Table,rate){
+
+plot.vals<-as.table(rbind(Q61Table[['SBS17b|SBS35']],
+Q61Table[['SBS35']],
+Q61Table[['SBS17b']],
+Q61Table[['ALL']])); rownames(plot.vals)<-c("noSBS17b.noSBS35.Q61H","noSBS17b.noSBS35.Other","noSBS17b.Q61H","noSBS17b.Other","noSBS35.Q61H","noSBS35.Other","ALL.Q61H","ALL.Other");
+
+## constant rate
+mat<-as.table(rbind(plot.vals[,paste0("x",rate)][grep("Q61H",rownames(plot.vals),invert=T)],plot.vals[,paste0("x",rate)][grep("Q61H",rownames(plot.vals))])); 
+
+fold.changes<-apply(rbind(mat[1,]/mat[2,],mat[2,]/mat[1,]),2,function(x) max(x))
+
+mids<-barplot(mat,beside=T,main=paste0("acceleration: x",rate),col=c("red","blue"), xaxt='n',ylim=c(0,100));
+
+text(x=mids[1,]+(mids[2,]-mids[1,])/2,y=98,labels=round(fold.changes,2))
+
+axis(1, at=mids[1,]+(mids[2,]-mids[1,])/2, labels=c("-","SBS17b","SBS35","All"),las=1)
+
+}
+
+```
+
+## Modelling Pipeline
+
+```{r}
+
+model.pipe<-function(){
+
+par(mfrow=c(2,2))
+
+Clocklike_MutationTotals<-raw.mutation.split(constant.signatures=signatures.constant,acceleration.start=acceleration.start,acceleration.end=acceleration.end)
+
+acceleration.plot(Clocklike_MutationTotal=Clocklike_MutationTotals,acceleration.start=acceleration.start,acceleration.end=acceleration.end)
+
+acceleration.adjusted.signatures<-adjusted.exposures(constant.signatures=signatures.constant,temp.signatures=signatures.temp,acceleration.start=acceleration.start,acceleration.end=acceleration.end)
+
+proportional.sig.contribution<-lapply(acceleration.adjusted.signatures,function(x) rowSums(x)/sum(x))
+
+constrain=c("ALL","SBS17b","SBS35","SBS17b|SBS35")
+
+weighted.signatures=list(); for(i in 1:length(constrain)) weighted.signatures[[constrain[i]]]<-lapply(proportional.sig.contribution,function(x) constrain.weighted.signatures(x,constrain[i]))
+
+Hotspot_Probabilities=list(); for(i in 1:length(constrain)) Hotspot_Probabilities[[constrain[i]]]<-lapply(weighted.signatures[[constrain[i]]],function(x) cbind(hotspot.contexts,rowSums(x)[hotspot.contexts[,1]]))
+
+Q61versusRest<-lapply(Hotspot_Probabilities,function(x) signature.influence(x))
+
+for(rate in rates) barplot.Q61(Q61versusRest,rate)
+  
+}
+
+```
+
+## Model 1
+
+Permanant Signatures: SBS1, SBS3, SBS5, SBS6, SBS15, SBS17a, SBS40
+
+Temporary Signatures: SBS17b, SBS35
+
+Tumour Growth Period: 2.7 years
+
+```{r,fig.width=10, fig.height=10, fig.align = "center"}
+
+signatures.constant<-c('SBS1','SBS3','SBS5','SBS6','SBS15','SBS17a','SBS40')
+signatures.temp<-c('SBS17b','SBS35')
+
+## acceleration parameters to model
+rates=c(1,5,10)
+
+## define the start and end of the tumour growth period
+acceleration.start=AGE_AT_DIAGNOSIS
+acceleration.end=AGE_AT_BIOPSY
+
+model.pipe()
+
+```
+
+## Model 2
+
+Permanant Signatures: SBS1, SBS5, SBS17a, SBS40
+
+Temporary Signatures: SBS3, SBS6, SBS15, SBS17b, SBS35
+
+Tumour Growth Period: 2.7 years
+
+```{r,fig.width=10, fig.height=10, fig.align = "center"}
+
+## defiine permanat and temporary signatures
+signatures.constant<-c('SBS1','SBS5','SBS17a','SBS40')
+signatures.temp<-c('SBS3','SBS6','SBS15','SBS17b','SBS35')
+
+## acceleration parameters to model
+rates=c(1,5,10)
+
+## define the start and end of the tumour growth period
+acceleration.start=AGE_AT_DIAGNOSIS
+acceleration.end=AGE_AT_BIOPSY
+
+model.pipe()
+
+```
+
+## Model 3
+
+Permanant Signatures: SBS1, SBS3, SBS5, SBS6, SBS15, SBS17a, SBS40
+
+Temporary Signatures: SBS17b, SBS35
+
+Tumour Growth Period: 5.4 years
+
+```{r,fig.width=10, fig.height=10, fig.align = "center"}
+
+## defiine permanat and temporary signatures
+signatures.constant<-c('SBS1','SBS3','SBS5','SBS6','SBS15','SBS17a','SBS40')
+signatures.temp<-c('SBS17b','SBS35')
+
+## acceleration parameters to model
+rates=c(1,5,10)
+
+## define the start and end of the tumour growth period
+acceleration.start=AGE_AT_TUMOUR_INITIATION
+acceleration.end=AGE_AT_BIOPSY
+
+model.pipe()
+
+```
+
+## Model 4
+
+Permanant Signatures: SBS1, SBS5, SBS17a, SBS40
+
+Temporary Signatures: SBS3, SBS6, SBS15, SBS17b, SBS35
+
+Tumour Growth Period: 5.4 years
+
+```{r,fig.width=10, fig.height=10, fig.align = "center"}
+
+## defiine permanat and temporary signatures
+signatures.constant<-c('SBS1','SBS5','SBS17a','SBS40')
+signatures.temp<-c('SBS3','SBS6','SBS15','SBS17b','SBS35')
+
+## acceleration parameters to model
+rates=c(1,5,10)
+
+## define the start and end of the tumour growth period
+acceleration.start=AGE_AT_TUMOUR_INITIATION
+acceleration.end=AGE_AT_BIOPSY
+
+model.pipe()
+
+```
+
+# Session Information
+
+```{r Session Info,echo=F,eval=T}
+devtools::session_info()
+
+# Session Workspace
+save.image(file=".Rdata")
+```
